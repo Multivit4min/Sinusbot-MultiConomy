@@ -1,0 +1,21 @@
+toc:
+  - name: Examples
+    children:
+      - name: How to load the library
+        file: examples/REQUIRE.md
+  - name: Classes
+    description: |
+      Definition for Classes
+  - Transaction
+  - DefaultStore
+  - name: Exports
+    description: |
+      These Functions gets exported as object when imported through `require("MultiConomy")`
+  - getCurrencySign
+  - getCurrencyName
+  - getBalance
+  - getBalances
+  - setBalance
+  - addBalance
+  - removeBalance
+  - getTopList
