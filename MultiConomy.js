@@ -5,12 +5,12 @@ registerPlugin({
   description: "Advanced Economy System",
   author: "Multivitamin <david.kartnaller@gmail.com",
   vars: [{
-    name: "currency_sign",
+    name: "currency_name",
     title: "Currency Name (Default: Coins)",
     type: "string",
     default: "Coins"
   },{
-    name: "currency_name",
+    name: "currency_sign",
     title: "Currency Sign (Default: $)",
     type: "string",
     default: "$"
@@ -26,9 +26,12 @@ registerPlugin({
   const backend = require("backend")
   const event = require("event")
 
+  var updateNickList = []
+  var updateNickTimeout = null
   var store = null
 
   event.on("load", () => {
+    //load the store if one had been set
     if (config.external_store !== false) {
       try {
         engine.log(`Trying to load external Store Plugin ${config.external_store}`)
@@ -41,7 +44,40 @@ registerPlugin({
       engine.log("Loading Default Store")
       store = new DefaultStore()
     }
+  
+    //register handler for nick updates
+    backend.getClients().map(pushNickQueue)
+    event.on("clientNick", ({client}) => store.updateNicks({ [client.uid()]: client.nick()}))
+    event.on("clientMove", ev => {
+      if (ev.fromChannel !== null) return
+      pushNickQueue(ev.client)
+    })
   })
+
+
+  /**
+   * Adds a client to the update queue
+   * @private
+   * @param {client} 
+   */
+  function pushNickQueue(client) {
+    if (updateNickList.some(c => c.uid() === client.uid())) return
+    updateNickList.push(client)
+    clearTimeout(updateNickTimeout)
+    updateNickTimeout = setTimeout(() => {
+      if (updateNickList.length === 0) return
+      var save = updateNickList.map(r => r)
+      updateNickList = []
+      var update = {}
+      save.forEach(c => update[client.uid()] = client.nick())
+      store.updateNicks(update)
+        .catch(e => {
+          engine.log("Updating Nicklist failed!")
+          save.forEach(pushNickQueue)
+        })
+    }, 500)
+  }
+
 
   class TransActionError extends Error {
     constructor(...args) {
@@ -117,16 +153,42 @@ registerPlugin({
       return Promise.resolve()
     }
 
+    /** 
+     * Updates the nicknames and uid map
+     * @param {object} list a list of uids as key and their nickname which should get updated and stored
+     * @returns {Promise} returns a Promise which resolves on success
+     */
+    updateNicks(list) {
+      Object
+        .keys(list)
+        .forEach(k => this.store.setInstance(`nickname_${k}`, list[k]))
+      return Promise.resolve()
+    }
+
+    /**
+     * retrieves multiple nicknames from cache
+     * @param {array} uids a list of uids which should get resolved
+     * @returns {Promise} returns a promise which resolves with the found nicknames, returns the uid if no nickname has been found
+     */
+    getNicknames(uids) {
+      var result = {}
+      uids.map(uid => {
+        var nick = this.store.getInstance(`nickname_${uid}`)
+        result[uid] = (typeof nick !== "string") ? uid : nick
+      })
+      return Promise.resolve(result)
+    }
+
     /**
      * Retrieves the toplist of uids sorted by their balance
      * @async
      * @param {number} offset the offset from where the first user should be display
      * @param {number} limit the amount of users which should be retrieved
-     * @returns {Promise} returns a Promise which resolves to an array of objects with uid and the balance amount
+     * @returns {Promise} returns a Promise which resolves to a sorted array of objects with uid and the balance amount
      */
     getTopList(offset = 0, limit = 10) {
-      return new Promise((fulfill, reject) => {
-        var result = this.store.getKeysInstance()
+      return Promise.resolve(
+        this.store.getKeysInstance()
           .filter(key => /^balance_[\/+a-zA-Z0-9]{27}=$/.test(key))
           .map(key => {
             return {
@@ -141,8 +203,7 @@ registerPlugin({
           })
           .reverse()
           .slice(offset, limit)
-        fulfill(result)
-      })
+      )
     }
     
   }
@@ -252,7 +313,6 @@ registerPlugin({
   engine.export({
     /**
      * Retrieves the currency sign
-     * @name getCurrencySign
      * @async
      * @returns {string} returns the set currency sign
      */
@@ -261,7 +321,6 @@ registerPlugin({
     },
     /**
      * Retrieves the currency name
-     * @name getCurrencyName
      * @async
      * @return {string} returns the currency name
      */
@@ -270,7 +329,6 @@ registerPlugin({
     },
     /** 
      * Retrieves the amount of money a client has
-     * @name getBalance
      * @async
      * @param {client|string} client takes a Sinusbot Client Object or uid which should be looked up
      * @returns {Promise} returns a Promise object which returns the amount of money a client has
@@ -285,10 +343,9 @@ registerPlugin({
     },
     /**
      * Retrieves the amount of money multiple clients have
-     * @name getBalances
      * @async
      * @param {client[]|string[]} clients takes a mix of Sinusbot Clients and uids which should be looked up
-     * @returns {Promise} returns a Promise object with an object of all client uids and their balance
+     * @returns {Promise} returns a Promise object with an object of all client uids, nickname and their balance
      */
     getBalances(clients) {
       if (!Array.isArray(clients)) clients = [clients]
@@ -296,7 +353,6 @@ registerPlugin({
     },
     /**
      * Sets the balance of one or multiple Clients
-     * @name setBalance
      * @async
      * @param {client[]|string[]} clients takes a mix of Sinusbot Clients and uids which should be set
      * @param {number} amount the balance which should be set
@@ -310,7 +366,6 @@ registerPlugin({
     },
     /**
      * Adds the specified amount of money to one or multiple clients
-     * @name addBalance
      * @async
      * @param {client[]|string[]} clients takes a mix of Sinusbot Clients and uids which should be set
      * @param {number} amount the balance which should be added
@@ -324,7 +379,6 @@ registerPlugin({
     },
     /**
      * Removes the specified amount of money to one or multiple clients
-     * @name removeBalance
      * @async
      * @param {client[]|string[]} clients takes a mix of Sinusbot Clients and uids which should be set
      * @param {number} amount the balance which should be removed
@@ -338,22 +392,25 @@ registerPlugin({
     },
     /**
      * Retrieves the toplist of uids sorted by their balance
-     * @name getTopList
      * @async
      * @param {number} offset the offset from where the first user should be display
      * @param {number} limit the amount of users which should be retrieved
      * @returns {Promise} returns a Promise which resolves to an array of objects with uid and the balance amount
      */
     getTopList(offset = 0, limit = 10) {
+      var topList = []
       return store.getTopList(offset, limit)
+        .then(list => (topList = list, store.getNicknames(list.map(r => r.uid))))
+        .then(nicks => topList.map(e => (e.nick = nicks[e.uid], e)))
     },
     /**
      * Creates a Transaction between to clients
-     * @name createTransaction
      * @returns {Transaction} returns a new Instance of Transaction
      */
     createTransaction() {
       return new Transaction(store)
     }
   })
+
+
 })
