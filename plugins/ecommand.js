@@ -33,11 +33,16 @@ registerPlugin({
     const { createCommand, createArgument, getCommandPrefix } = Command
 
     createCommand("balance")
-      .help("Shows your current balance")
-      .exec(async (client, _, reply) => {
+      .help("Shows your current balance or the balance of others")
+      .addArgument(createArgument("client").setName("other").optional())
+      .exec(async (client, { other }, reply) => {
         return new Promise(async (fulfill, reject) => {
           try {
-            reply(`You own [b]${await eco.getBalance(client)}${eco.getCurrencySign()}[/b]`)
+            if (other) {
+              reply(`${getNameFromUid(other)} owns [b]${await eco.getBalance(other)}${eco.getCurrencySign()}[/b]`)
+            } else {
+              reply(`You own [b]${await eco.getBalance(client)}${eco.getCurrencySign()}[/b]`)
+            }
             fulfill()
           } catch (e) {
             reject(e)
@@ -91,7 +96,7 @@ registerPlugin({
               .sender(client)
               .receiver(receiver)
               .execute()
-            reply(`You have sent [b]${amount} ${eco.getCurrencySign()}[/b] to [b]${getNameFromUid(uid)}[/b]!`)
+            reply(`You have sent [b]${amount} ${eco.getCurrencySign()}[/b] to [b]${getNameFromUid(receiver)}[/b]!`)
             fulfill()
           } catch (e) {
             if (e.constructor.name === "TransActionError") {
