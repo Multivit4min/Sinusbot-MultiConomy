@@ -6,16 +6,15 @@ toc:
   - name: Classes
     description: |
       Definition for Classes
-  - Transaction
+  - Wallet
+  - Bank
   - DefaultStore
   - name: Exports
     description: |
       These Functions gets exported as object when imported through `require("MultiConomy")`
   - getCurrencySign
   - getCurrencyName
+  - getWallet
   - getBalance
   - getBalances
-  - setBalance
-  - addBalance
-  - removeBalance
   - getTopList

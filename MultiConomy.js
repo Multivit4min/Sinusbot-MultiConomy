@@ -1,3 +1,5 @@
+/* eslint-disable no-async-promise-executor */
+/* eslint-disable no-undef */
 registerPlugin({
   name: "MultiConomy",
   engine: ">= 0.13.37",
@@ -9,12 +11,12 @@ registerPlugin({
     title: "Currency Name (Default: Coins)",
     type: "string",
     default: "Coins"
-  },{
+  }, {
     name: "currency_sign",
     title: "Currency Sign (Default: $)",
     type: "string",
     default: "$"
-  },{
+  }, {
     name: "external_store",
     title: "Want to use a third party Store? Enter the filename of the Script here",
     type: "string",
@@ -26,33 +28,121 @@ registerPlugin({
   const backend = require("backend")
   const event = require("event")
 
-  var updateNickList = []
-  var updateNickTimeout = null
-  var store = null
+  let updateNickList = []
+  let updateNickTimeout = null
+  let store = null
+  let bank = null
 
-  event.on("load", () => {
-    //load the store if one had been set
-    if (config.external_store !== false) {
-      try {
-        engine.log(`Trying to load external Store Plugin ${config.external_store}`)
-        store = require(config.external_store)()
-      } catch (e) {
-        engine.log(`Could not load external Plugin `)
+  /**
+   * creates a new wallet
+   * @param {string} uid the uid to who the wallet belongs to
+   * @param {bigint|number|string} balance the amount of funds a wallet has
+   * @param {Bank} bankHandle the bank to which the wallet belongs to
+   */
+  class Wallet {
+    constructor(bankHandle, uid, balance) {
+      this._bank = bankHandle
+      this._uid = uid
+      this._balance = Wallet.convertToBigInt(balance)
+    }
+
+    /**
+     * Adds this wallet to the save queue
+     */
+    _save() {
+      this._bank.queueSave(this)
+    }
+
+    /**
+     * Converts a number to a BigInt, this will remove any floating point
+     * @param {bigint|number|string} num the number which should be parsed to a bigint
+     * @returns  {bigint} returns the converted bigint
+     */
+    static convertToBigInt(num) {
+      switch (typeof num) {
+        case "bigint": 
+          return num
+        case "number": 
+          if (!Number.isSafeInteger(num)) {
+            engine.log(`WARNING a unsafe integer is being converted! (${num})`)
+            engine.log(`See https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER for details`)
+          }
+          return BigInt(num)
+        case "string":
+          if (isNaN(num)) throw new Error("Non numeric string given")
+          return BigInt(num)
+        default: throw new Error(`Tried to convert unknown type ${typeof num} to BigInt!`)
       }
     }
-    if (store === null) {
-      engine.log("Loading Default Store")
-      store = new DefaultStore()
+
+    /**
+     * @returns {Object} returns a JSON.stringify able object 
+     */
+    serialize() {
+      return {
+        uid: this.uid,
+        balance: String(this.balance)
+      }
     }
-  
-    //register handler for nick updates
-    backend.getClients().map(pushNickQueue)
-    event.on("clientNick", ({client}) => store.updateNicks({ [client.uid()]: client.nick()}))
-    event.on("clientMove", ev => {
-      if (ev.fromChannel !== null) return
-      pushNickQueue(ev.client)
-    })
-  })
+
+    /**
+     * Checks if a user has enough funds to do a transaction
+     * @param {bigint|number|string} amount checks if a user has the amount of funds
+     * @returns {boolean} returns true when the user has at least as much funds
+     */
+    hasFunds(amount) {
+      return this._balance >= Wallet.convertToBigInt(amount)
+    }
+
+    /**
+     * Adds an amount of funds to the wallet
+     * @param {bigint|number|string} amount  the amount of funds which should be added
+     * @returns {Wallet} returns this to chain functions
+     */
+    addBalance(amount) {
+      this._balance += Wallet.convertToBigInt(amount)
+      this._save()
+      return this
+    }
+
+    /**
+     * Sets the amount of funds in the wallet
+     * @param {bigint|number|string} amount  the amount of funds which should be set
+     * @returns {Wallet} returns this to chain functions
+     */
+    setBalance(amount) {
+      this._balance = Wallet.convertToBigInt(amount)
+      this._save()
+      return this
+    }
+
+    /**
+     * Removes an amount of funds from the wallet
+     * @param {bigint|number|string} amount  the amount of funds which should be removed
+     * @returns {Wallet} returns this to chain functions
+     */
+    removeBalance(amount) {
+      this._balance -= Wallet.convertToBigInt(amount)
+      this._save()
+      return this
+    }
+
+    /**
+     * Retrieve the current balance
+     * @returns {string} returns the current balance as string
+     */
+    getBalance() {
+      return String(this._balance)
+    }
+
+    /**
+     * Retrieve the owner of the wallet
+     * @returns {string} returns the uid of the wallet owner
+     */
+    getOwner() {
+      return this._uid
+    }
+  }
 
 
   /**
@@ -66,24 +156,19 @@ registerPlugin({
     clearTimeout(updateNickTimeout)
     updateNickTimeout = setTimeout(() => {
       if (updateNickList.length === 0) return
-      var save = updateNickList.map(r => r)
+      const save = updateNickList.map(r => r)
+      const update = {}
       updateNickList = []
-      var update = {}
-      save.forEach(c => update[client.uid()] = client.nick())
+      save.forEach(c => update[c.uid()] = c.nick())
       store.updateNicks(update)
         .catch(e => {
+          engine.log(e.stack)
           engine.log("Updating Nicklist failed!")
           save.forEach(pushNickQueue)
         })
     }, 500)
   }
 
-
-  class TransActionError extends Error {
-    constructor(...args) {
-      super(...args)
-    }
-  }
 
   /**
    * Creates a new Store class
@@ -101,9 +186,9 @@ registerPlugin({
      * @returns {Promise} returns a Promise which resolves to an object with the uids as key and the balance as value
      */
     getBalance(uids) {
-      var balance = {}
+      const balance = {}
       uids.forEach(uid => {
-        var funds = this.store.getInstance(`balance_${uid}`)
+        const funds = this.store.getInstance(`balance_${uid}`)
         balance[uid] = isNaN(funds) ? 0 : funds
       })
       return Promise.resolve(balance)
@@ -112,44 +197,13 @@ registerPlugin({
     /**
      * Sets the balance of multiple uids to the given value
      * @async
-     * @param {string[]} uids takes an array of uids as argument
-     * @param {number} amount the amount which should be set
+     * @param {Object[]} data an array of objects
+     * @param {string} data[].uid the uid of the client
+     * @param {string} data[].balance the balance which should get saved
      * @returns {Promise} returns a Promise which resolves on success
      */
-    setBalance(uids, amount) {
-      uids.forEach(uid => this.store.setInstance(`balance_${uid}`, amount))
-      return Promise.resolve()
-    }
-
-    /**
-     * Adds balance to multiple uids
-     * @async
-     * @param {string[]} uids takes an array of uids as argument
-     * @param {number} amount the amount which should be added
-     * @returns {Promise} returns a Promise which resolves on success
-     */
-    addBalance(uids, amount) {
-      var balance = {}
-      uids.forEach(uid => {
-        var funds = this.store.getInstance(`balance_${uid}`)
-        this.store.setInstance(`balance_${uid}`, isNaN(funds) ? amount : funds+amount)
-      })
-      return Promise.resolve()
-    }
-
-    /**
-     * Removes balance from multiple uids
-     * @async
-     * @param {string[]} uids takes an array of uids as argument
-     * @param {number} amount the amount which should be removed
-     * @returns {Promise} returns a Promise which resolves on success
-     */
-    removeBalance(uids, amount) {
-      var balance = {}
-      uids.forEach(uid => {
-        var funds = this.store.getInstance(`balance_${uid}`)
-        this.store.setInstance(`balance_${uid}`, isNaN(funds) ? amount*-1 : funds-amount)
-      })
+    setBalance(data) {
+      Object.keys(data).forEach(k => this.store.setInstance(`balance_${data[k].uid}`, data[k].balance))
       return Promise.resolve()
     }
 
@@ -171,10 +225,10 @@ registerPlugin({
      * @returns {Promise} returns a promise which resolves with the found nicknames, returns the uid if no nickname has been found
      */
     getNicknames(uids) {
-      var result = {}
-      uids.map(uid => {
-        var nick = this.store.getInstance(`nickname_${uid}`)
-        result[uid] = (typeof nick !== "string") ? uid : nick
+      const result = {}
+      uids.forEach(uid => {
+        const nick = this.store.getInstance(`nickname_${uid}`)
+        result[uid] = typeof nick === "string" ? nick : uid
       })
       return Promise.resolve(result)
     }
@@ -187,23 +241,19 @@ registerPlugin({
      * @returns {Promise} returns a Promise which resolves to a sorted array of objects with uid and the balance amount
      */
     getTopList(offset = 0, limit = 10) {
-      return Promise.resolve(
-        this.store.getKeysInstance()
-          .filter(key => /^balance_[\/+a-zA-Z0-9]{27}=$/.test(key))
-          .map(key => {
-            return {
-              uid: key.match(/^balance_(?<uid>[\/+a-zA-Z0-9]{27}=)$/).groups.uid,
-              balance: this.store.getInstance(key)
-            }
-          })
+      return Promise.resolve(this.store.getKeysInstance()
+          .filter(key => (/^balance_[/+a-zA-Z0-9]{27}=$/).test(key))
+          .map(key => ({
+            uid: key.match(/^balance_(?<uid>[/+a-zA-Z0-9]{27}=)$/).groups.uid,
+            balance: this.store.getInstance(key)
+          }))
           .sort((a, b) => {
             if (a.balance < b.balance) return -1
             if (a.balance > b.balance) return 1
             return 0
           })
           .reverse()
-          .slice(offset, limit)
-      )
+          .slice(offset, limit))
     }
     
   }
@@ -216,7 +266,7 @@ registerPlugin({
    */
   function fetchUid(client) {
     if (typeof client === "string") {
-      if (!/^[a-z0-9\/+]{27}=$/i.test(client)) 
+      if (!(/^[a-z0-9/+]{27}=$/i).test(client)) 
         throw new Error(`Missmatch, expected a uid matching [a-z0-9\\/+]{27}=`)
       return client
     }
@@ -228,89 +278,109 @@ registerPlugin({
     throw new Error(`Expected a string or object but got ${typeof client}`)
   }
 
+
   /**
-   * A Fund transaction between two clients
+   * Bank manages wallets of multiple users
    * @constructor
-   * @param {object} store the store object from where transactions get handled
+   * @param {object} storeHandle the store object from where transactions get handled
    */
-  class Transaction {
-    constructor(store) {
-      this._store = store
-      this._allowNegativebalance = false
-      this._amount = 0
-      this._receiver = null
-      this._sender = null
+  class Bank {
+    constructor(storeHandle) {
+      this._store = storeHandle
+      this._wallets = []
+      this._saveQueue = []
+      this._saveTimeout = null
     }
 
     /**
-     * Sets the amount which should be transfered
-     * @param {number} amount the amount of funds which should be transferred
-     * @returns {this} returns this to make calls chainable
+     * Adds a new wallet to the saving Queue
+     * @param {Wallet} wallet the wallet which should get saved 
      */
-    amount(amount) {
-      if (typeof amount !== "number" || amount < 0) throw new Error("Amount should be a positive number")
-      this._amount = amount
-      return this
+    queueSave(wallet) {
+      clearTimeout(this._saveTimeout)
+      this._saveTimeout = setTimeout(() => this.flushQueue(), 1000)
+      this._saveQueue.push(wallet)
     }
 
     /**
-     * Sets the Sender of the transaction, this client will get the funds removed
-     * @param {client|string} client a sinusbot client or uid from where the balances should be removed
-     * @returns {this} returns this to make calls chainable
+     * Forces the save of all wallets in the queue
      */
-    sender(client) {
-      this._sender = fetchUid(client)
-      return this
+    flushQueue() {
+      clearTimeout(this._saveTimeout)
+      if (this._saveQueue.length === 0) return
+      this._store.setBalance(this._saveQueue.map(wallet => wallet.serialize()))
+      this._saveQueue = []
     }
 
     /**
-     * Sets the Receiver of the transaction, this client will get the funds added
-     * @param {client|string} client a sinusbot client or uid where the balances should be added
-     * @returns {this} returns this to make calls chainable
+     * Tries to get the wallet from cache
+     * @private
+     * @param {string} uid 
+     * @returns {Wallet} returns the cached wallet if found, otherwise null
      */
-    receiver(client) {
-      this._receiver = fetchUid(client)
-      return this
+    _getWalletFromCache(uid) {
+      return this._wallets.find(wallet => wallet.getOwner() === uid)
     }
 
     /**
-     * Allows a negative Balance for the sender after this transaction
-     * @param {boolean} [allow=true] set to true so the sender can get into a negative balance
-     * @returns {this} returns this to make calls chainable
+     * Creates a wallet and returns it 
+     * @param  {...any} args the arguments which will passed to the Wallet constructor
+     * @returns {Wallet} returns the created wallet
      */
-    allowNegativeBalance(allow=true) {
-      this._allowNegativebalance = allow
-      return this
+    _createWallet(...args) {
+      const wallet = new Wallet(bank, ...args)
+      this._wallets.push(wallet)
+      return wallet
     }
 
     /**
-     * Executes the transaction
-     * @async
-     * @returns {Promise} returns a Promise which resolves when successful
+     * 
+     * @param {string} uid the uid from who the wallet should get retrieved
+     * @returns {Promise} fulfills with the Wallet of the given uid
      */
-    execute() {
-      return new Promise(async (fulfill, reject) => {
-        try {
-          if (!this._allowNegativebalance) {
-            var balance = (await this._store.getBalance([this._sender]))[this._sender]
-            if (balance < this._amount) throw new TransActionError("Insufficent funds")
-          }
-          await Promise.all([
-            this._store.addBalance([this._receiver], this._amount),
-            this._store.removeBalance([this._sender], this._amount)
-          ])
-          fulfill()
-        } catch (e) {
-          reject(e)
-        }
-      })
+    getWallet(uid) {
+      const wallet = this._getWalletFromCache(uid)
+      if (wallet instanceof Wallet) return Promise.resolve(wallet)
+      return store.getBalance([uid])
+        .then(balance => Promise.resolve(this._createWallet(uid, balance[uid])))
     }
-
   }
 
+  event.on("load", () => {
+    //load the store if one had been set
+    if (config.external_store !== false) {
+      try {
+        engine.log(`Trying to load external Store Plugin ${config.external_store}`)
+        store = require(config.external_store)()
+      } catch (e) {
+        engine.log(`Could not load external Plugin `)
+      }
+    }
+    if (store === null) {
+      engine.log("Loading Default Store")
+      store = new DefaultStore()
+    }
+  
+    bank = new Bank(store)
+    //register handler for nick updates
+    backend.getClients().map(pushNickQueue)
+    event.on("clientNick", ({client}) => store.updateNicks({ [client.uid()]: client.nick()}))
+    event.on("clientMove", ev => {
+      if (ev.fromChannel !== null) return
+      pushNickQueue(ev.client)
+    })
+  })
+
+  event.on("load", () => {
+    //nothing to save
+    if (bank === null) return 
+    //flush all changed wallets to disk
+    bank.flushQueue() 
+  })
 
 
   engine.export({
+
     /**
      * Retrieves the currency sign
      * @async
@@ -319,6 +389,7 @@ registerPlugin({
     getCurrencySign() {
       return config.currency_sign
     },
+
     /**
      * Retrieves the currency name
      * @async
@@ -327,6 +398,16 @@ registerPlugin({
     getCurrencyName() {
       return config.currency_name
     },
+
+    /** 
+     * Retrieves a wallet from a client
+     * @param {client|string} client takes a Sinusbot Client Object or uid which should be looked up
+     * @returns {Promise} returns a Promise object which resolves to the wallet
+     */
+    getWallet(client) {
+      return bank.getWallet(fetchUid(client))
+    },
+
     /** 
      * Retrieves the amount of money a client has
      * @async
@@ -335,12 +416,13 @@ registerPlugin({
      */
     getBalance(client) {      
       return new Promise((fulfill, reject) => {
-        var uid = fetchUid(client)
+        const uid = fetchUid(client)
         store.getBalance([uid])
           .then(amount => fulfill(amount[uid]))
           .catch(reject)
       })
     },
+
     /**
      * Retrieves the amount of money multiple clients have
      * @async
@@ -351,45 +433,7 @@ registerPlugin({
       if (!Array.isArray(clients)) clients = [clients]
       return store.getBalance(clients.map(fetchUid))
     },
-    /**
-     * Sets the balance of one or multiple Clients
-     * @async
-     * @param {client[]|string[]} clients takes a mix of Sinusbot Clients and uids which should be set
-     * @param {number} amount the balance which should be set
-     * @returns {Promise} returns a Promise object which resolves on success
-     */
-    setBalance(clients, amount) {
-      if (typeof amount !== "number") 
-        return Promise.reject(new Error("Set Balance amount must be a number!"))
-      if (!Array.isArray(clients)) clients = [clients]
-      return store.setBalance(clients.map(fetchUid), amount)
-    },
-    /**
-     * Adds the specified amount of money to one or multiple clients
-     * @async
-     * @param {client[]|string[]} clients takes a mix of Sinusbot Clients and uids which should be set
-     * @param {number} amount the balance which should be added
-     * @returns {Promise} returns a Promise object which resolves on success
-     */
-    addBalance(clients, amount) {
-      if (typeof amount !== "number" || amount < 0) 
-        return Promise.reject(new Error("Add Balance amount must be a positive number!"))
-      if (!Array.isArray(clients)) clients = [clients]
-      return store.addBalance(clients.map(fetchUid), amount)
-    },
-    /**
-     * Removes the specified amount of money to one or multiple clients
-     * @async
-     * @param {client[]|string[]} clients takes a mix of Sinusbot Clients and uids which should be set
-     * @param {number} amount the balance which should be removed
-     * @returns {Promise} returns a Promise object which resolves on success
-     */
-    removeBalance(clients, amount) {
-      if (typeof amount !== "number" || amount < 0) 
-        return Promise.reject(new Error("Add Balance amount must be a positive number!"))
-      if (!Array.isArray(clients)) clients = [clients]
-      return store.removeBalance(clients.map(fetchUid), amount)
-    },
+
     /**
      * Retrieves the toplist of uids sorted by their balance
      * @async
@@ -398,17 +442,10 @@ registerPlugin({
      * @returns {Promise} returns a Promise which resolves to an array of objects with uid and the balance amount
      */
     getTopList(offset = 0, limit = 10) {
-      var topList = []
+      let topList = []
       return store.getTopList(offset, limit)
-        .then(list => (topList = list, store.getNicknames(list.map(r => r.uid))))
-        .then(nicks => topList.map(e => (e.nick = nicks[e.uid], e)))
-    },
-    /**
-     * Creates a Transaction between to clients
-     * @returns {Transaction} returns a new Instance of Transaction
-     */
-    createTransaction() {
-      return new Transaction(store)
+        .then(list => ((topList = list, store.getNicknames(list.map(r => r.uid)))))
+        .then(nicks => topList.map(e => ((e.nick = nicks[e.uid], e))))
     }
   })
 
