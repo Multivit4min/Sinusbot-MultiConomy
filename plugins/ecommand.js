@@ -15,6 +15,7 @@ registerPlugin({
   const engine = require("engine")
   const event = require("event")
   const backend = require("backend")
+  const format = require("format")
 
   function allowAdminCommands(client) {
     return config.admins.indexOf(client.uid()) >= 0
@@ -30,83 +31,108 @@ registerPlugin({
     if (!eco) return engine.log("MultiConomy.js not found! Please be sure to install and enable MultiConomy.js")
     const Command = require("Command")
     if (!Command) return engine.log("Command.js not found! Please be sure to install and enable Command.js")
-    const { createCommand, createArgument, getCommandPrefix } = Command
+    const { createCommand, createArgument, createGroupedArgument, createCommandGroup } = Command
 
-    createCommand("balance")
-      .help("Shows your current balance or the balance of others")
-      .addArgument(createArgument("client").setName("other").optional())
-      .exec(async (client, { other }, reply) => {
-        return new Promise(async (fulfill, reject) => {
-          try {
-            if (other) {
-              reply(`${getNameFromUid(other)} owns [b]${await eco.getBalance(other)}${eco.getCurrencySign()}[/b]`)
-            } else {
-              reply(`You own [b]${await eco.getBalance(client)}${eco.getCurrencySign()}[/b]`)
-            }
-            fulfill()
-          } catch (e) {
-            reject(e)
-          }
-        })
-      })
 
-    createCommand("top")
-      .help("Shows balance of the top users")
-      .manual(`Gets the top 10 richest clients`)
-      .exec((client, _, reply) => {
-        return new Promise(async (fulfill, reject) => {
-          try {
-            var top = await eco.getTopList(0, 10)
-            if (top.length === 0) return reply("No Clients found")
-            top.map(({balance, nick}) => reply(`[b]${nick}[/b] ${balance}${eco.getCurrencySign()}`))
-            fulfill()
-          } catch (e) {
-            reject(e)
-          }
-        })
-      })
-
-    createCommand("setbalance")
-      .help("sets the balance of a user to the given amount")
+    const balanceCommand = createCommandGroup("balance")
+      .help("manges balance of clients")
       .checkPermission(allowAdminCommands)
+
+    //balance set <uid> <amount>
+    balanceCommand
+      .addCommand("set")
+      .help("sets the balance of a client")
       .addArgument(createArgument("client").setName("uid"))
       .addArgument(createArgument("number").setName("amount").min(0).integer())
-      .exec((client, { uid, amount }, reply) => {
-        return new Promise(async (fulfill, reject) => {
-          try {
-            await eco.setBalance(uid, amount)
-            reply(`Balance has been set to [b]${amount}[/b] for [b]${getNameFromUid(uid)}[/b]!`)
-            fulfill()
-          } catch (e) {
-            reject(e)
-          }
-        })
+      .exec(async (client, { uid, amount }, reply) => {
+        const wallet = await eco.getWallet(uid)
+        wallet.setBalance(amount, "Set via Admin Command")
+        reply(`Balance has been set to ${format.bold(amount)} for ${format.bold(getNameFromUid(uid))}!`)
       })
 
-    createCommand("pay")
+    //balance add <uid> <amount>
+    balanceCommand
+      .addCommand("add")
+      .help("adds the balance to a client")
+      .addArgument(createArgument("client").setName("uid"))
+      .addArgument(createArgument("number").setName("amount").min(0).integer())
+      .exec(async (client, { uid, amount }, reply) => {
+        const wallet = await eco.getWallet(uid)
+        wallet.addBalance(amount, "Added via Admin Command")
+        reply(`${format.bold(amount)} have been added to ${format.bold(getNameFromUid(uid))}!`)
+      })
+
+    //balance remove <uid> <amount>
+    balanceCommand
+      .addCommand("remove")
+      .help("remove the balance from a client")
+      .addArgument(createArgument("client").setName("uid"))
+      .addArgument(createArgument("number").setName("amount").min(0).integer())
+      .exec(async (client, { uid, amount }, reply) => {
+        const wallet = await eco.getWallet(uid)
+        wallet.removeBalance(amount, "Removed by Admin Command")
+        reply(`${format.bold(amount)} have been removed to ${format.bold(getNameFromUid(uid))}!`)
+      })
+
+    //balance remove <uid> <amount>
+    balanceCommand
+      .addCommand("view")
+      .help("views the amount of funds a client has")
+      .addArgument(createArgument("client").setName("uid"))
+      .exec(async (client, { uid }, reply) => {
+        const wallet = await eco.getWallet(uid)
+        reply(`${getNameFromUid(wallet.getOwner())} owns ${wallet.getBalance()}${eco.getCurrencySign()}`)
+      })
+
+    //wallet - view your balance
+    const walletCommand = createCommandGroup("wallet")
+      .help("manges your wallet")
+      .exec(async (client, _, reply) => {
+        const wallet = await eco.getWallet(client)
+        reply(`You own ${wallet.getBalance()}${eco.getCurrencySign()}`)
+      })
+
+    //wallet history - gets the last 50 transactions you made
+    walletCommand
+      .addCommand("history")
+      .help("view your transaction history")
+      .manual(`displays details about your 50 last transactions`)
+      .exec(async (client, _, reply) => {
+        try {
+          const wallet = await eco.getWallet(client)
+          const history = await wallet.getHistory(50)
+          if (history.length === 0) return reply("No transactions found!")
+          history.forEach(({ change, date, reason }) => {
+            return reply(`${format.bold(change < 0 ? `[color=red]${change}[/color]` : `[color=green]${change}[/color]`)} - ${reason}`)
+          })
+        } catch(e) {
+          engine.log(e.stack)
+        }
+      })
+
+    //wallet pay <client> <amount> - sends the amount of money to another client
+    walletCommand
+      .addCommand("pay")
       .help("sends money to another client")
-      .manual(`The first parameter should be a user which receives the money\nThe Second Parameter is the amount which the users receives`)
+      .manual(`The first parameter should be a user which receives the money`)
+      .manual(`The Second Parameter is the amount which the users receives`)
       .addArgument(createArgument("client").setName("receiver"))
       .addArgument(createArgument("number").setName("amount").positive().integer())
-      .exec((client, { receiver, amount }, reply) => {
-        return new Promise(async (fulfill, reject) => {
-          try {
-            await eco.createTransaction()
-              .amount(amount)
-              .sender(client)
-              .receiver(receiver)
-              .execute()
-            reply(`You have sent [b]${amount} ${eco.getCurrencySign()}[/b] to [b]${getNameFromUid(receiver)}[/b]!`)
-            fulfill()
-          } catch (e) {
-            if (e.constructor.name === "TransActionError") {
-              reply(`Failed to create Transaction: [b]${e.message}[/b]`)
-              return fulfill()
-            }
-            reject(e)
-          }
-        })
+      .exec(async (client, { receiver, amount }, reply) => {
+        try {
+          const [receiverWallet, senderWallet] = await Promise.all([eco.getWallet(receiver), eco.getWallet(client)])
+          if (!senderWallet.hasFunds(amount)) return reply("You do not have enough funds to do this transaction!")
+          receiverWallet.addBalance(amount, `Received from ${senderWallet.getOwner()}`)
+          senderWallet.removeBalance(amount, `Sent to ${receiverWallet.getOwner()}`)
+          reply(`You have sent ${amount}${eco.getCurrencySign()} to ${getNameFromUid(receiver)}!`)
+          const receiverClient = backend.getClientByUID(receiver)
+          if (!receiverClient) return
+          receiverClient.chat(`You have received ${amount}${eco.getCurrencySign()} from ${getNameFromUid(client.nick())}!`)
+        } catch(e) {
+          engine.log(e.stack)
+        }
       })
+
 
   })
 })

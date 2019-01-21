@@ -34,148 +34,14 @@ registerPlugin({
   let bank = null
 
   /**
-   * creates a new wallet
-   * @param {string} uid the uid to who the wallet belongs to
-   * @param {bigint|number|string} balance the amount of funds a wallet has
-   * @param {Bank} bankHandle the bank to which the wallet belongs to
-   */
-  class Wallet {
-    constructor(bankHandle, uid, balance) {
-      this._bank = bankHandle
-      this._uid = uid
-      this._balance = Wallet.convertToBigInt(balance)
-    }
-
-    /**
-     * Adds this wallet to the save queue
-     */
-    _save() {
-      this._bank.queueSave(this)
-    }
-
-    /**
-     * Converts a number to a BigInt, this will remove any floating point
-     * @param {bigint|number|string} num the number which should be parsed to a bigint
-     * @returns  {bigint} returns the converted bigint
-     */
-    static convertToBigInt(num) {
-      switch (typeof num) {
-        case "bigint": 
-          return num
-        case "number": 
-          if (!Number.isSafeInteger(num)) {
-            engine.log(`WARNING a unsafe integer is being converted! (${num})`)
-            engine.log(`See https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER for details`)
-          }
-          return BigInt(num)
-        case "string":
-          if (isNaN(num)) throw new Error("Non numeric string given")
-          return BigInt(num)
-        default: throw new Error(`Tried to convert unknown type ${typeof num} to BigInt!`)
-      }
-    }
-
-    /**
-     * @returns {Object} returns a JSON.stringify able object 
-     */
-    serialize() {
-      return {
-        uid: this.uid,
-        balance: String(this.balance)
-      }
-    }
-
-    /**
-     * Checks if a user has enough funds to do a transaction
-     * @param {bigint|number|string} amount checks if a user has the amount of funds
-     * @returns {boolean} returns true when the user has at least as much funds
-     */
-    hasFunds(amount) {
-      return this._balance >= Wallet.convertToBigInt(amount)
-    }
-
-    /**
-     * Adds an amount of funds to the wallet
-     * @param {bigint|number|string} amount  the amount of funds which should be added
-     * @returns {Wallet} returns this to chain functions
-     */
-    addBalance(amount) {
-      this._balance += Wallet.convertToBigInt(amount)
-      this._save()
-      return this
-    }
-
-    /**
-     * Sets the amount of funds in the wallet
-     * @param {bigint|number|string} amount  the amount of funds which should be set
-     * @returns {Wallet} returns this to chain functions
-     */
-    setBalance(amount) {
-      this._balance = Wallet.convertToBigInt(amount)
-      this._save()
-      return this
-    }
-
-    /**
-     * Removes an amount of funds from the wallet
-     * @param {bigint|number|string} amount  the amount of funds which should be removed
-     * @returns {Wallet} returns this to chain functions
-     */
-    removeBalance(amount) {
-      this._balance -= Wallet.convertToBigInt(amount)
-      this._save()
-      return this
-    }
-
-    /**
-     * Retrieve the current balance
-     * @returns {string} returns the current balance as string
-     */
-    getBalance() {
-      return String(this._balance)
-    }
-
-    /**
-     * Retrieve the owner of the wallet
-     * @returns {string} returns the uid of the wallet owner
-     */
-    getOwner() {
-      return this._uid
-    }
-  }
-
-
-  /**
-   * Adds a client to the update queue
-   * @private
-   * @param {client} 
-   */
-  function pushNickQueue(client) {
-    if (updateNickList.some(c => c.uid() === client.uid())) return
-    updateNickList.push(client)
-    clearTimeout(updateNickTimeout)
-    updateNickTimeout = setTimeout(() => {
-      if (updateNickList.length === 0) return
-      const save = updateNickList.map(r => r)
-      const update = {}
-      updateNickList = []
-      save.forEach(c => update[c.uid()] = c.nick())
-      store.updateNicks(update)
-        .catch(e => {
-          engine.log(e.stack)
-          engine.log("Updating Nicklist failed!")
-          save.forEach(pushNickQueue)
-        })
-    }, 500)
-  }
-
-
-  /**
    * Creates a new Store class
    * @constructor
    */
   class DefaultStore {
     constructor() {
+      this._prefixBalance = "ecobalance_"
+      this._prefixHistory = "ecohistory_"
+      this._prefixNickname = "econickname_"
       this.store = require("store")
     }
 
@@ -188,10 +54,44 @@ registerPlugin({
     getBalance(uids) {
       const balance = {}
       uids.forEach(uid => {
-        const funds = this.store.getInstance(`balance_${uid}`)
+        const funds = this.store.getInstance(`${this._prefixBalance}${uid}`)
         balance[uid] = isNaN(funds) ? 0 : funds
       })
       return Promise.resolve(balance)
+    }
+
+    /**
+     * Retrieves the transaction history of a uid
+     * @async
+     * @param {string} uid the uid for which the history should be retrieved
+     * @param {number} limit the amount of entries which should be retrieved
+     * @returns {Promise} returns a Promise which resolves to an object with the uids as key and the transaction array as value
+     */
+    getHistory(uid, limit) {
+      const history = this.store.getInstance(`${this._prefixHistory}${uid}`)
+      if (!Array.isArray(history)) return Promise.resolve([])
+      return Promise.resolve(history.slice(history.length - limit, history.length))
+    }
+
+    /**
+     * Adds transaction to the transaction history of an uid
+     * @async
+     * @param {Object[]} data the transaction data which should be added
+     * @param {string} data[].uid the uid from the owner of the transaction
+     * @param {number} data[].change the value of how much the balance changed
+     * @param {number} data[].date the date as Date.now() format
+     * @param {string} data[].reason the reason text (max 255 chars)
+     * @returns {Promise} returns a Promise which resolves on success
+     */
+    addHistory(data) {
+      data.forEach(d => {
+        const { uid, ...insert } = d
+        let history = this.store.getInstance(`${this._prefixHistory}${uid}`)
+        if (!Array.isArray(history)) history = []
+        history.push(insert)
+        this.store.setInstance(`${this._prefixHistory}${uid}`, history)
+      })
+      return Promise.resolve()
     }
 
     /**
@@ -203,19 +103,19 @@ registerPlugin({
      * @returns {Promise} returns a Promise which resolves on success
      */
     setBalance(data) {
-      Object.keys(data).forEach(k => this.store.setInstance(`balance_${data[k].uid}`, data[k].balance))
+      Object.keys(data).forEach(k => this.store.setInstance(`${this._prefixBalance}${data[k].uid}`, data[k].balance))
       return Promise.resolve()
     }
 
     /** 
      * Updates the nicknames and uid map
-     * @param {object} list a list of uids as key and their nickname which should get updated and stored
+     * @param {object} list a list of uids as key and their nickname as value which should get updated and stored
      * @returns {Promise} returns a Promise which resolves on success
      */
     updateNicks(list) {
       Object
         .keys(list)
-        .forEach(k => this.store.setInstance(`nickname_${k}`, list[k]))
+        .forEach(k => this.store.setInstance(`${this._prefixNickname}${k}`, list[k]))
       return Promise.resolve()
     }
 
@@ -227,7 +127,7 @@ registerPlugin({
     getNicknames(uids) {
       const result = {}
       uids.forEach(uid => {
-        const nick = this.store.getInstance(`nickname_${uid}`)
+        const nick = this.store.getInstance(`${this._prefixNickname}${uid}`)
         result[uid] = typeof nick === "string" ? nick : uid
       })
       return Promise.resolve(result)
@@ -257,6 +157,198 @@ registerPlugin({
     }
     
   }
+
+
+  /**
+   * creates a new wallet
+   * @param {string} uid the uid to who the wallet belongs to
+   * @param {bigint|number|string} balance the amount of funds a wallet has
+   * @param {Bank} bankHandle the bank to which the wallet belongs to
+   */
+  class Wallet {
+    constructor(bankHandle, uid, balance) {
+      this._bank = bankHandle
+      this._uid = uid
+      this._balance = Wallet.convertToBigInt(balance)
+      this._unsavedHistory = []
+    }
+
+    /**
+     * Adds this wallet to the save queue
+     * @private
+     */
+    _save() {
+      this._bank.queueSave(this)
+    }
+
+    /**
+     * Queues a history update
+     * @param {bigint} change the amount which had changed
+     * @param {string} reason the text wich should be used in the log
+     */
+    _addHistory(change, reason) {
+      if (reason.length > 255) throw new Error("Reason length should not have more than 255 Chars!")
+      this._unsavedHistory.push({ 
+        change: String(change),
+        date: Date.now(),
+        reason 
+      })
+    }
+
+    /**
+     * Converts a number to a BigInt, this will remove any floating point
+     * @param {bigint|number|string} num the number which should be parsed to a bigint
+     * @returns  {bigint} returns the converted bigint
+     */
+    static convertToBigInt(num) {
+      switch (typeof num) {
+        case "bigint": 
+          return num
+        case "number": 
+          if (!Number.isSafeInteger(num)) {
+            engine.log(`WARNING a unsafe integer is being converted! (${num})`)
+            engine.log(`See https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER for details`)
+          }
+          return BigInt(num)
+        case "string":
+          if (isNaN(num)) throw new Error("Non numeric string given")
+          return BigInt(num)
+        default: throw new Error(`Tried to convert unknown type ${typeof num} to BigInt!`)
+      }
+    }
+
+    /**
+     * Serializes the balace and uid of the Wallet
+     * @returns {Object} returns a JSON.stringify able object 
+     */
+    serializeBalance() {
+      return {
+        uid: this._uid,
+        balance: String(this._balance)
+      }
+    }
+
+    /**
+     * clears and returns the transaction history
+     * @private
+     * @returns {Object[]} returns a JSON.stringify able object 
+     */
+    getAndClearHistory() {
+      const history = [...this._unsavedHistory]
+      this._unsavedHistory = []
+      return history.map(data => ({
+        ...data,
+        uid: this.getOwner()
+      }))
+    }
+
+    /**
+     * Checks if a user has enough funds to do a transaction
+     * @param {bigint|number|string} amount checks if a user has the amount of funds
+     * @returns {boolean} returns true when the user has at least as much funds
+     */
+    hasFunds(amount) {
+      return this._balance >= Wallet.convertToBigInt(amount)
+    }
+
+    /**
+     * Adds an amount of funds to the wallet
+     * @param {bigint|number|string} amount  the amount of funds which should be added
+     * @param {string} [reason] the reason which gets logged inside the transaction history
+     * @returns {Wallet} returns this to chain functions
+     */
+    addBalance(amount, reason = "") {
+      amount = Wallet.convertToBigInt(amount)
+      this._addHistory(amount, reason)
+      this._balance += amount
+      this._save()
+      return this
+    }
+
+    /**
+     * Sets the amount of funds in the wallet
+     * @param {bigint|number|string} amount  the amount of funds which should be set
+     * @param {string} [reason] the reason which gets logged inside the transaction history
+     * @returns {Wallet} returns this to chain functions
+     */
+    setBalance(amount, reason = "") {
+      amount = Wallet.convertToBigInt(amount)
+      this._addHistory(amount - this._balance, reason)
+      this._balance = amount
+      this._save()
+      return this
+    }
+
+    /**
+     * Removes an amount of funds from the wallet
+     * @param {bigint|number|string} amount  the amount of funds which should be removed
+     * @param {string} [reason] the reason which gets logged inside the transaction history
+     * @returns {Wallet} returns this to chain functions
+     */
+    removeBalance(amount, reason = "") {
+      amount = Wallet.convertToBigInt(amount)
+      this._addHistory(amount * -1, reason)
+      this._balance -= amount
+      this._save()
+      return this
+    }
+
+    /**
+     * Retrieve the current balance
+     * @returns {string} returns the current balance as string
+     */
+    getBalance() {
+      return String(this._balance)
+    }
+
+    /**
+     * Retrieve the owner of the wallet
+     * @returns {string} returns the uid of the wallet owner
+     */
+    getOwner() {
+      return this._uid
+    }
+
+    /**
+     * Retrieves the transaction history
+     * @async
+     * @param {number} [limit=25] the amount of entries which should get retrieved
+     * @returns {Promise[]} returns a Promise which has an array with the last n transactions
+     */
+    async getHistory(limit = 25) {
+      const length = this._unsavedHistory.length
+      if (limit <= length) return this._unsavedHistory.slice(length - limit, length)
+      const data = await this._bank.getHistory(this.getOwner(), limit - length)
+      data.push(...this._unsavedHistory)
+      return data
+    }
+  }
+
+
+  /**
+   * Adds a client to the update queue
+   * @private
+   * @param {client} 
+   */
+  function pushNickQueue(client) {
+    if (updateNickList.some(c => c.uid() === client.uid())) return
+    updateNickList.push(client)
+    clearTimeout(updateNickTimeout)
+    updateNickTimeout = setTimeout(() => {
+      if (updateNickList.length === 0) return
+      const save = updateNickList.map(r => r)
+      const update = {}
+      updateNickList = []
+      save.forEach(c => update[c.uid()] = c.nick())
+      store.updateNicks(update)
+        .catch(e => {
+          engine.log(e.stack)
+          engine.log("Updating Nicklist failed!")
+          save.forEach(pushNickQueue)
+        })
+    }, 500)
+  }
+
 
   /**
    * Resolves the input to a uid 
@@ -298,7 +390,8 @@ registerPlugin({
      */
     queueSave(wallet) {
       clearTimeout(this._saveTimeout)
-      this._saveTimeout = setTimeout(() => this.flushQueue(), 1000)
+      this._saveTimeout = setTimeout(() => this.flushQueue(), 10 * 1000)
+      if (this._saveQueue.includes(wallet)) return
       this._saveQueue.push(wallet)
     }
 
@@ -308,7 +401,10 @@ registerPlugin({
     flushQueue() {
       clearTimeout(this._saveTimeout)
       if (this._saveQueue.length === 0) return
-      this._store.setBalance(this._saveQueue.map(wallet => wallet.serialize()))
+      this._store.setBalance(this._saveQueue.map(wallet => wallet.serializeBalance()))
+      const history = []
+      this._saveQueue.forEach(wallet => history.push(...wallet.getAndClearHistory()))
+      this._store.addHistory(history)
       this._saveQueue = []
     }
 
@@ -344,6 +440,17 @@ registerPlugin({
       return store.getBalance([uid])
         .then(balance => Promise.resolve(this._createWallet(uid, balance[uid])))
     }
+
+    /**
+     * Retrieves the transaction history of a uid
+     * @async
+     * @param {string} uid the uid for which the history should be retrieved
+     * @param {number} limit the amount of entries which should be retrieved
+     * @returns {Promise} returns a Promise which resolves to an object with the uids as key and the transaction array as value
+     */
+    getHistory(uid, limit) {
+      return this._store.getHistory(uid, limit)
+    }
   }
 
   event.on("load", () => {
@@ -351,9 +458,16 @@ registerPlugin({
     if (config.external_store !== false) {
       try {
         engine.log(`Trying to load external Store Plugin ${config.external_store}`)
-        store = require(config.external_store)()
+        const StorePlugin = require(config.external_store)
+        store = new StorePlugin()
+        ;["getBalance", "setBalance", "updateNicks", "getNicknames", "getTopList", "getHistory", "addHistory"].forEach(name => {
+          if (!Object.keys(store).includes(name) || typeof store[name] !== "function") {
+            throw new Error(`Error External store does not support the method #${name}`)
+          }
+        })
       } catch (e) {
-        engine.log(`Could not load external Plugin `)
+        engine.log(`Could not load external Store Plugin for MultiConomy!`)
+        engine.log(e.stack)
       }
     }
     if (store === null) {
@@ -371,7 +485,7 @@ registerPlugin({
     })
   })
 
-  event.on("load", () => {
+  event.on("unload", () => {
     //nothing to save
     if (bank === null) return 
     //flush all changed wallets to disk
@@ -401,6 +515,7 @@ registerPlugin({
 
     /** 
      * Retrieves a wallet from a client
+     * BEWARE, never cache the wallet on your side, always request a new wallet
      * @param {client|string} client takes a Sinusbot Client Object or uid which should be looked up
      * @returns {Promise} returns a Promise object which resolves to the wallet
      */
