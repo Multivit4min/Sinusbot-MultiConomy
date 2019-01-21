@@ -453,13 +453,13 @@ registerPlugin({
     }
   }
 
-  event.on("load", () => {
+  event.on("load", async () => {
     //load the store if one had been set
     if (config.external_store !== false) {
       try {
         engine.log(`Trying to load external Store Plugin ${config.external_store}`)
-        const StorePlugin = require(config.external_store)
-        store = new StorePlugin()
+        store = await require(config.external_store)()
+        console.log(Object.keys(store))
         ;["getBalance", "setBalance", "updateNicks", "getNicknames", "getTopList", "getHistory", "addHistory"].forEach(name => {
           if (!Object.keys(store).includes(name) || typeof store[name] !== "function") {
             throw new Error(`Error External store does not support the method #${name}`)
