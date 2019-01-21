@@ -287,7 +287,7 @@ registerPlugin({
      */
     removeBalance(amount, reason = "") {
       amount = Wallet.convertToBigInt(amount)
-      this._addHistory(amount * -1, reason)
+      this._addHistory(amount * -1n, reason)
       this._balance -= amount
       this._save()
       return this
@@ -390,7 +390,7 @@ registerPlugin({
      */
     queueSave(wallet) {
       clearTimeout(this._saveTimeout)
-      this._saveTimeout = setTimeout(() => this.flushQueue(), 10 * 1000)
+      this._saveTimeout = setTimeout(() => this.flushQueue(), 2 * 1000)
       if (this._saveQueue.includes(wallet)) return
       this._saveQueue.push(wallet)
     }
@@ -401,10 +401,16 @@ registerPlugin({
     flushQueue() {
       clearTimeout(this._saveTimeout)
       if (this._saveQueue.length === 0) return
-      this._store.setBalance(this._saveQueue.map(wallet => wallet.serializeBalance()))
       const history = []
       this._saveQueue.forEach(wallet => history.push(...wallet.getAndClearHistory()))
-      this._store.addHistory(history)
+      Promise.all([
+        this._store.setBalance(this._saveQueue.map(wallet => wallet.serializeBalance())),
+        this._store.addHistory(history)
+      ])
+      .catch(e => {
+        engine.log("Failed to store balance and/or history!")
+        engine.log(e.stack)
+      })
       this._saveQueue = []
     }
 
@@ -459,12 +465,6 @@ registerPlugin({
       try {
         engine.log(`Trying to load external Store Plugin ${config.external_store}`)
         store = await require(config.external_store)()
-        console.log(Object.keys(store))
-        ;["getBalance", "setBalance", "updateNicks", "getNicknames", "getTopList", "getHistory", "addHistory"].forEach(name => {
-          if (!Object.keys(store).includes(name) || typeof store[name] !== "function") {
-            throw new Error(`Error External store does not support the method #${name}`)
-          }
-        })
       } catch (e) {
         engine.log(`Could not load external Store Plugin for MultiConomy!`)
         engine.log(e.stack)
@@ -478,7 +478,7 @@ registerPlugin({
     bank = new Bank(store)
     //register handler for nick updates
     backend.getClients().map(pushNickQueue)
-    event.on("clientNick", ({client}) => store.updateNicks({ [client.uid()]: client.nick()}))
+    event.on("clientNick", client => store.updateNicks({ [client.uid()]: client.nick()}))
     event.on("clientMove", ev => {
       if (ev.fromChannel !== null) return
       pushNickQueue(ev.client)

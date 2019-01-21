@@ -231,23 +231,15 @@ registerPlugin({
      * @param {number} limit the amount of users which should be retrieved
      * @returns {Promise} returns a Promise which resolves to a sorted array of objects with uid and the balance amount
      */
-    // eslint-disable-next-line no-inline-comments
-    getTopList(/*offset = 0, limit = 10*/) {
-      return Promise.reject(new Error("Not implemented"))
-      /*return Promise.resolve(this.store.getKeysInstance()
-          .filter(key => (/^balance_[/+a-zA-Z0-9]{27}=$/).test(key))
-          .map(key => ({
-            uid: key.match(/^balance_(?<uid>[/+a-zA-Z0-9]{27}=)$/).groups.uid,
-            balance: this.store.getInstance(key)
-          }))
-          .sort((a, b) => {
-            if (a.balance < b.balance) return -1
-            if (a.balance > b.balance) return 1
-            return 0
-          })
-          .reverse()
-          .slice(offset, limit))
-      */
+    getTopList(offset = 0, limit = 10) {
+      return new Promise((fulfill, reject) => {
+        super.query(`SELECT uid, balance FROM balances ORDER BY balance DESC LIMIT ? OFFSET ?`, limit, offset)
+          .then(data => fulfill(data.map(d => ({
+            uid: intArrayToString(d.uid),
+            balance: d.balance.toString()
+          }))))
+          .catch(reject)
+      })
     }
     
   }

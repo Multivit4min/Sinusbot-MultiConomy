@@ -1,3 +1,4 @@
+/* eslint-disable no-shadow */
 registerPlugin({
   name: "MultiConomy Commmands",
   engine: ">= 0.13.37",
@@ -22,7 +23,7 @@ registerPlugin({
   }
 
   function getNameFromUid(uid) {
-    var client = backend.getClientByUID(uid)
+    const client = backend.getClientByUID(uid)
     return client ? client.nick() : uid
   }
 
@@ -31,7 +32,7 @@ registerPlugin({
     if (!eco) return engine.log("MultiConomy.js not found! Please be sure to install and enable MultiConomy.js")
     const Command = require("Command")
     if (!Command) return engine.log("Command.js not found! Please be sure to install and enable Command.js")
-    const { createCommand, createArgument, createGroupedArgument, createCommandGroup } = Command
+    const { createArgument, createCommandGroup } = Command
 
 
     const balanceCommand = createCommandGroup("balance")
@@ -84,6 +85,17 @@ registerPlugin({
         reply(`${getNameFromUid(wallet.getOwner())} owns ${wallet.getBalance()}${eco.getCurrencySign()}`)
       })
 
+    //balance top 
+    balanceCommand
+      .addCommand("top")
+      .help("shows the top 5 richest users")
+      .exec(async (client, _, reply) => {
+        const toplist = await eco.getTopList()
+        toplist.forEach((data, i) => {
+          reply(`${i+1} - ${format.bold(`${data.balance}${eco.getCurrencySign()}`)} - ${data.nick}`)
+        })
+      })
+
     //wallet - view your balance
     const walletCommand = createCommandGroup("wallet")
       .help("manges your wallet")
@@ -102,9 +114,7 @@ registerPlugin({
           const wallet = await eco.getWallet(client)
           const history = await wallet.getHistory(50)
           if (history.length === 0) return reply("No transactions found!")
-          history.forEach(({ change, date, reason }) => {
-            return reply(`${format.bold(change < 0 ? `[color=red]${change}[/color]` : `[color=green]${change}[/color]`)} - ${reason}`)
-          })
+          history.forEach(({ change, reason }) => reply(`${format.bold(change < 0 ? `[color=red]${change}[/color]` : `[color=green]${change}[/color]`)} - ${reason}`))
         } catch(e) {
           engine.log(e.stack)
         }
