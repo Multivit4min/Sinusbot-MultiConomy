@@ -30,8 +30,8 @@ registerPlugin({
   event.on("load", () => {
     const eco = require("MultiConomy")
     if (!eco) return engine.log("MultiConomy.js not found! Please be sure to install and enable MultiConomy.js")
-    const Command = require("Command")
-    if (!Command) return engine.log("Command.js not found! Please be sure to install and enable Command.js")
+    const Command = require("command")
+    if (!Command) return engine.log("command.js not found! Please be sure to install and enable Command.js")
     const { createArgument, createCommandGroup } = Command
 
 
