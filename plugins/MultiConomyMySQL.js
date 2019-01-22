@@ -16,6 +16,11 @@ registerPlugin({
     type: "string",
     default: "127.0.0.1"
   }, {
+    name: "port",
+    title: "MySQL Port",
+    type: "number",
+    default: 3306
+  }, {
     name: "username",
     title: "MySQL username",
     type: "string",
@@ -30,11 +35,26 @@ registerPlugin({
     title: "Database name",
     type: "string",
     default: ""
+  }, {
+    name: "prefix",
+    title: "Table Prefix (Default: 'eco_')",
+    type: "string",
+    default: "eco_"
   }]
 }, (_, config) => {
 
   const engine = require("engine")
   const db = require("db")
+
+  if (!(/^[a-z_0-9]*$/i).test(config.prefix)) return engine.log("ERROR! TABLE PREFIX NAME SHOULD ONLY CONTAIN a-z, 0-9 or _ !!!")
+
+  function tableBalance() {
+    return `${config.prefix}balances`
+  }
+
+  function tableHistory() {
+    return `${config.prefix}history`
+  }
 
   function intArrayToString(array) {
     return array.map(a => String.fromCharCode(a)).join("")
@@ -88,24 +108,22 @@ registerPlugin({
       return new Promise((fulfill, reject) => {
         super.connect()
           .then(() => this.query(
-            "CREATE TABLE IF NOT EXISTS `balances` (\
-            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,\
-            `uid` VARCHAR(50) NOT NULL,\
-            `balance` BIGINT NOT NULL DEFAULT '0',\
-            `nickname` VARCHAR(50) NOT NULL DEFAULT '0',\
-            PRIMARY KEY (`id`),\
-            UNIQUE INDEX (`uid`),\
-            INDEX (`balance`))"
+            `CREATE TABLE IF NOT EXISTS \`${tableBalance()}\` (\
+            \`uid\` VARCHAR(50) NOT NULL,\
+            \`balance\` BIGINT NOT NULL DEFAULT '0',\
+            \`nickname\` VARCHAR(50) NOT NULL DEFAULT '0',\
+            UNIQUE INDEX (\`uid\`),\
+            INDEX (\`balance\`))`
           ))
           .then(() => this.query(
-            "CREATE TABLE IF NOT EXISTS `history` (\
-            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,\
-            `uid` VARCHAR(50) NOT NULL,\
-            `change` BIGINT NOT NULL,\
-            `reason` VARCHAR(255) NOT NULL,\
-            `date` INT UNSIGNED NOT NULL,\
-            PRIMARY KEY (`id`),\
-            INDEX (`uid`, `date`))"
+            `CREATE TABLE IF NOT EXISTS \`${tableHistory()}\` (\
+              \`id\` INT UNSIGNED NOT NULL AUTO_INCREMENT,\
+              \`uid\` VARCHAR(50) NOT NULL,\
+              \`change\` BIGINT NOT NULL,\
+              \`reason\` VARCHAR(255) NOT NULL,\
+              \`date\` INT UNSIGNED NOT NULL,\
+            PRIMARY KEY (\`id\`),\
+            INDEX (\`uid\`, \`date\`))`
           ))
           .then(() => fulfill())
           .catch(reject)
@@ -120,7 +138,7 @@ registerPlugin({
      */
     getBalance(uids) {
       return new Promise((fulfill, reject) => {
-        super.query(`SELECT uid, balance FROM balances WHERE uid IN (${Array(uids.length).fill("?").join(",")})`, ...uids)
+        super.query(`SELECT uid, balance FROM ${tableBalance()} WHERE uid IN (${Array(uids.length).fill("?").join(",")})`, ...uids)
           .then(res => {
             const balance = {}
             uids.forEach(uid => {
@@ -143,7 +161,7 @@ registerPlugin({
      */
     getHistory(uid, limit) {
       return new Promise((fulfill, reject) => {
-        super.query(`SELECT \`change\`, date, reason FROM history WHERE uid = ? LIMIT ?`, uid, limit)
+        super.query(`SELECT \`change\`, date, reason FROM ${tableHistory()} WHERE uid = ? LIMIT ?`, uid, limit)
           .then(res => fulfill(res.map(r => ({
             change: r.change.toString(),
             date: parseInt(r.date, 10),
@@ -167,7 +185,7 @@ registerPlugin({
       const insert = []
       data.forEach(d => insert.push(d.uid, d.change, Math.floor(d.date/1000), d.reason))
       return super.query(
-        `INSERT INTO history (uid, \`change\`, date, reason) VALUES ${Array(data.length).fill("(?,?,?,?)").join(",")}`,
+        `INSERT INTO ${tableHistory()} (uid, \`change\`, date, reason) VALUES ${Array(data.length).fill("(?,?,?,?)").join(",")}`,
         ...insert
       )
     }
@@ -184,7 +202,7 @@ registerPlugin({
       const args = []
       data.forEach(({ uid, balance }) => args.push(uid, balance))
       return super.query(
-        `INSERT INTO balances (uid, balance) VALUES ${Array(data.length).fill("(?,?)").join(",")} ON DUPLICATE KEY UPDATE balance = VALUES(balance)`,
+        `INSERT INTO ${tableBalance()} (uid, balance) VALUES ${Array(data.length).fill("(?,?)").join(",")} ON DUPLICATE KEY UPDATE balance = VALUES(balance)`,
         ...args
       )
     }
@@ -195,11 +213,9 @@ registerPlugin({
      * @returns {Promise} returns a Promise which resolves on success
      */
     updateNicks(list) {
-      const args = []
-      Object.keys(list).forEach(uid => args.push(uid, list[uid]))
       return super.query(
-        `INSERT INTO balances (uid, nickname) VALUES ${Array(Object.keys(list).length).fill("(?,?)").join(",")} ON DUPLICATE KEY UPDATE nickname = VALUES(nickname)`,
-        ...args
+        `INSERT INTO ${tableBalance()} (uid, nickname) VALUES ${Array(Object.keys(list).length).fill("(?,?)").join(",")} ON DUPLICATE KEY UPDATE nickname = VALUES(nickname)`, 
+        Object.entries(list).flat()
       )
     }
 
@@ -210,7 +226,7 @@ registerPlugin({
      */
     getNicknames(uids) {
       return new Promise((fulfill, reject) => {
-        super.query(`SELECT uid, nickname FROM balances WHERE uid IN (${Array(uids.length).fill("?").join(",")})`, ...uids)
+        super.query(`SELECT uid, nickname FROM ${tableBalance()} WHERE uid IN (${Array(uids.length).fill("?").join(",")})`, ...uids)
           .then(res => {
             const nicks = {}
             uids.forEach(uid => {
@@ -233,7 +249,7 @@ registerPlugin({
      */
     getTopList(offset = 0, limit = 10) {
       return new Promise((fulfill, reject) => {
-        super.query(`SELECT uid, balance FROM balances ORDER BY balance DESC LIMIT ? OFFSET ?`, limit, offset)
+        super.query(`SELECT uid, balance FROM ${tableBalance()} ORDER BY balance DESC LIMIT ? OFFSET ?`, limit, offset)
           .then(data => fulfill(data.map(d => ({
             uid: intArrayToString(d.uid),
             balance: d.balance.toString()
