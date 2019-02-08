@@ -298,7 +298,8 @@ registerPlugin({
      */
     queueSave(wallet) {
       clearTimeout(this._saveTimeout)
-      this._saveTimeout = setTimeout(() => this.flushQueue(), 1000)
+      this._saveTimeout = setTimeout(() => this.flushQueue(), 10 * 1000)
+      if (this._saveQueue.includes(wallet)) return
       this._saveQueue.push(wallet)
     }
 
