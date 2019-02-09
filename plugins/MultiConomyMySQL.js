@@ -76,7 +76,7 @@ registerPlugin({
           if (err) return reject(new Error(err))
           fulfill(this)
         })
-      })  
+      })
     }
 
     query(...params) {
@@ -207,15 +207,16 @@ registerPlugin({
       )
     }
 
-    /** 
+    /**
      * Updates the nicknames and uid map
      * @param {object} list a list of uids as key and their nickname as value which should get updated and stored
      * @returns {Promise} returns a Promise which resolves on success
      */
     updateNicks(list) {
+      console.log(list)
       return super.query(
-        `INSERT INTO ${tableBalance()} (uid, nickname) VALUES ${Array(Object.keys(list).length).fill("(?,?)").join(",")} ON DUPLICATE KEY UPDATE nickname = VALUES(nickname)`, 
-        Object.entries(list).flat()
+        `INSERT INTO ${tableBalance()} (uid, nickname) VALUES ${Array(Object.keys(list).length).fill("(?,?)").join(",")} ON DUPLICATE KEY UPDATE nickname = VALUES(nickname)`,
+        ...Object.entries(list).flat()
       )
     }
 
@@ -257,17 +258,17 @@ registerPlugin({
           .catch(reject)
       })
     }
-    
+
   }
 
 
   engine.export(() => {
     return new Promise(async (fulfill, reject) => {
-      try{
+      try {
         const mysql = new MySQLStore(config)
         await mysql.connect()
         fulfill(mysql)
-      } catch(e) {
+      } catch (e) {
         reject(e)
       }
     })
