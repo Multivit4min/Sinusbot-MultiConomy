@@ -213,10 +213,11 @@ registerPlugin({
      * @returns {Promise} returns a Promise which resolves on success
      */
     updateNicks(list) {
-      console.log(list)
+      const update = []
+      Object.keys(list).forEach(uid => update.push(uid, list[uid]))
       return super.query(
-        `INSERT INTO ${tableBalance()} (uid, nickname) VALUES ${Array(Object.keys(list).length).fill("(?,?)").join(",")} ON DUPLICATE KEY UPDATE nickname = VALUES(nickname)`,
-        ...Object.entries(list).flat()
+        `INSERT INTO ${tableBalance()} (uid, nickname) VALUES ${Array(update.length / 2).fill("(?,?)").join(",")} ON DUPLICATE KEY UPDATE nickname = VALUES(nickname)`,
+        ...update
       )
     }
 
