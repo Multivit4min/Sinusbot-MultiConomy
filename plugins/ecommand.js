@@ -19,7 +19,14 @@ registerPlugin({
   const format = require("format")
 
   function allowAdminCommands(client) {
-    return config.admins.indexOf(client.uid()) >= 0
+    switch (engine.getBackend()) {
+      case "discord":
+        return config.admins.includes(client.uid().split("/")[1])
+      case "ts3":
+        return config.admins.includes(client.uid())
+      default:
+        throw new Error(`Unknown backend ${engine.getBackend()}`)
+    }
   }
 
   function getNameFromUid(uid) {
@@ -85,7 +92,7 @@ registerPlugin({
         reply(`${getNameFromUid(wallet.getOwner())} owns ${wallet.getBalance()}${eco.getCurrencySign()}`)
       })
 
-    //balance top 
+    //balance top
     balanceCommand
       .addCommand("top")
       .help("shows the top 5 richest users")
@@ -115,7 +122,7 @@ registerPlugin({
           const history = await wallet.getHistory(50)
           if (history.length === 0) return reply("No transactions found!")
           history.forEach(({ change, reason }) => reply(`${format.bold(change < 0 ? `[color=red]${change}[/color]` : `[color=green]${change}[/color]`)} - ${reason}`))
-        } catch(e) {
+        } catch (e) {
           engine.log(e.stack)
         }
       })
@@ -138,7 +145,7 @@ registerPlugin({
           const receiverClient = backend.getClientByUID(receiver)
           if (!receiverClient) return
           receiverClient.chat(`You have received ${amount}${eco.getCurrencySign()} from ${getNameFromUid(client.nick())}!`)
-        } catch(e) {
+        } catch (e) {
           engine.log(e.stack)
         }
       })

@@ -146,9 +146,9 @@ registerPlugin({
      */
     getTopList(offset = 0, limit = 10) {
       return Promise.resolve(this.store.getKeysInstance()
-        .filter(key => (/^balance_[/+a-zA-Z0-9]{27}=$/).test(key))
+        .filter(key => (/^balance_([/+a-zA-Z0-9]{27}=|\d{18})$/).test(key))
         .map(key => ({
-          uid: key.match(/^balance_(?<uid>[/+a-zA-Z0-9]{27}=)$/).groups.uid,
+          uid: key.match(/^balance_(?<uid>[/+a-zA-Z0-9]{27}=|\d{18})$/).groups.uid,
           balance: this.store.getInstance(key)
         }))
         .sort((a, b) => {
@@ -362,14 +362,18 @@ registerPlugin({
    */
   function fetchUid(client) {
     if (typeof client === "string") {
-      if (!(/^[a-z0-9/+]{27}=$/i).test(client))
-        throw new Error(`Missmatch, expected a uid matching [a-z0-9\\/+]{27}=`)
+      if (!(/^([a-z0-9/+]{27}=|\d{18})$/i).test(client))
+        throw new Error(`Missmatch, expected a uid matching ([a-z0-9\\/+]{27}=|\\d{18})`)
       return client
     }
     if (typeof client === "object") {
       if (typeof client.uid !== "function")
         throw new Error(`Expected client.uid to be a function but got ${typeof client.uid}`)
-      return client.uid()
+      switch (engine.getBackend()) {
+        case "ts3": return client.uid()
+        case "discord": return client.uid().split("/")[1]
+        default: throw new Error(`Unknown Backend ${engine.getBackend()}`)
+      }
     }
     throw new Error(`Expected a string or object but got ${typeof client}`)
   }

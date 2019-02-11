@@ -1,7 +1,4 @@
-/* eslint-disable lines-around-comment */
 /* eslint-disable function-paren-newline */
-/* eslint-disable no-multi-str */
-/* eslint-disable arrow-body-style */
 /* eslint-disable no-async-promise-executor */
 registerPlugin({
   name: "MultiConomy MySQL Extension",
@@ -263,17 +260,15 @@ registerPlugin({
   }
 
 
-  engine.export(() => {
-    return new Promise(async (fulfill, reject) => {
-      try {
-        const mysql = new MySQLStore(config)
-        await mysql.connect()
-        fulfill(mysql)
-      } catch (e) {
-        reject(e)
-      }
-    })
-  })
+  engine.export(() => new Promise(async (fulfill, reject) => {
+    try {
+      const mysql = new MySQLStore(config)
+      await mysql.connect()
+      fulfill(mysql)
+    } catch (e) {
+      reject(e)
+    }
+  }))
 
 
 })

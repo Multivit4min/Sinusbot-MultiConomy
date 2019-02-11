@@ -4,6 +4,7 @@ registerPlugin({
   version: "0.1.0",
   description: "Commands for Multiconomy",
   author: "Multivitamin <david.kartnaller@gmail.com",
+  backends: ["ts3"],
   requiredModules: ["http"],
   vars: [{
     name: "KEY",
@@ -42,14 +43,14 @@ registerPlugin({
         if (res.statusCode !== 200) return reject(new Error(`Failed to retrieve data from teamspeak-servers.org api! (Code ${res.statusCode})`))
         try {
           fulfill(JSON.parse(res.data.toString()).votes)
-        } catch(e) {
+        } catch (e) {
           return reject(e)
         }
       })
     })
   }
 
-  
+
 
   event.on("load", () => {
     const eco = require("MultiConomy")
@@ -96,11 +97,11 @@ registerPlugin({
         .then(votes => {
           votes.forEach(vote => {
             //get the votes of the specific client
-            let nickVotes = store.getInstance(`votes_${encodeURI(vote.nickname)}`) 
+            let nickVotes = store.getInstance(`votes_${encodeURI(vote.nickname)}`)
             //no votes exist yet create a new Object
-            if (nickVotes === undefined) nickVotes = {} 
+            if (nickVotes === undefined) nickVotes = {}
             //vote already has been added
-            if (nickVotes[String(vote.timestamp)] !== undefined) return 
+            if (nickVotes[String(vote.timestamp)] !== undefined) return
             //add a new vote to the array
             nickVotes[String(vote.timestamp)] = {
               nickname: vote.nickname,
