@@ -1,7 +1,7 @@
 /* global BigInt */
 registerPlugin({
   name: "MultiConomy",
-  engine: ">= 0.13.37",
+  engine: ">= 1.0.0",
   version: "0.1.0",
   description: "Advanced Economy System",
   author: "Multivitamin <david.kartnaller@gmail.com",
@@ -25,6 +25,35 @@ registerPlugin({
     title: "Disable cache (disable cache when you access the same wallet store with multiple Sinusbot Instances)",
     type: "checkbox",
     default: 0
+  }, {
+    name: "dump",
+    title: "Run database dump actions",
+    type: "select",
+    options: [
+      "do nothing",
+      "create backup from store",
+      "get informations about the current backup",
+      "export backup via console",
+      "import a backup string",
+      "load backup to store",
+      "erase the current selected store"
+    ],
+    default: 0
+  }, {
+    name: "importb64",
+    title: "BASE64 Import String",
+    type: "string",
+    conditions: [{ field: "dump", value: 4 }]
+  }, {
+    name: "confirm_restore",
+    title: "Confirm that you want to restore the backup with 'CONFIRM RESTORE'",
+    type: "string",
+    conditions: [{ field: "dump", value: 5 }]
+  }, {
+    name: "confirm_wipe",
+    title: "Confirm that you want to delete all data with 'CONFIRM ERASE'",
+    type: "string",
+    conditions: [{ field: "dump", value: 6 }]
   }]
 }, (_, config) => {
 
@@ -39,7 +68,6 @@ registerPlugin({
 
   /**
    * Creates a new Store class
-   * @constructor
    */
   class DefaultStore {
     constructor() {
@@ -47,6 +75,19 @@ registerPlugin({
       this._prefixHistory = "ecohistory_"
       this._prefixNickname = "econickname_"
       this.store = require("store")
+    }
+
+    /**
+     * Resets and wipes the complete Store except the dump
+     * @async
+     * @returns {Promise}
+     */
+    reset() {
+      const prefix = [this._prefixBalance, this._prefixHistory, this._prefixNickname]
+      this.store.getKeysInstance()
+        .filter(key => prefix.some(p => key.startsWith(p)))
+        .forEach(key => this.store.unsetInstance(key))
+      return Promise.resolve()
     }
 
     /**
@@ -65,7 +106,16 @@ registerPlugin({
     }
 
     /**
-     * Retrieves the transaction history of a uid
+     * Retrieves the balance of all existing users in the db
+     * @async
+     * @returns {Promise} returns a Promise which resolves to an object with the uids as key and the balance as value
+     */
+    getAllBalances() {
+      return Promise.resolve(this._fetchKeys(this._prefixBalance))
+    }
+
+    /**
+     * Retrieves the transaction history of an uid
      * @async
      * @param {string} uid the uid for which the history should be retrieved
      * @param {number} limit the amount of entries which should be retrieved
@@ -75,6 +125,15 @@ registerPlugin({
       const history = this.store.getInstance(`${this._prefixHistory}${uid}`)
       if (!Array.isArray(history)) return Promise.resolve([])
       return Promise.resolve(history.slice(history.length - limit, history.length))
+    }
+
+    /**
+     * Retrieves the transaction history of an uid
+     * @async
+     * @returns {Promise} returns a Promise which resolves to an object with the uids as key and the transaction array as value
+     */
+    getAllHistory() {
+      return Promise.resolve(this._fetchKeys(this._prefixHistory))
     }
 
     /**
@@ -138,6 +197,28 @@ registerPlugin({
     }
 
     /**
+     * Retrieves the transaction history of an uid
+     * @async
+     * @returns {Promise} returns a Promise which resolves to an object with the uids as key and the transaction array as value
+     */
+    getAllNicknames() {
+      return Promise.resolve(this._fetchKeys(this._prefixNickname))
+    }
+
+    /**
+     * Fetches a specific type of keys
+     * @private
+     */
+    _fetchKeys(prefix) {
+      const res = {}
+      this.store.getKeysInstance()
+        .map(key => key.match(RegExp(`^${prefix}(?<uid>[a-z0-9/+]{27}=)$`, "i")))
+        .filter(x => x !== null)
+        .forEach(match => res[match[1]] = this.store.getInstance(match[0]))
+      return res
+    }
+
+    /**
      * Retrieves the toplist of uids sorted by their balance
      * @async
      * @param {number} offset the offset from where the first user should be display
@@ -145,19 +226,22 @@ registerPlugin({
      * @returns {Promise} returns a Promise which resolves to a sorted array of objects with uid and the balance amount
      */
     getTopList(offset = 0, limit = 10) {
-      return Promise.resolve(this.store.getKeysInstance()
-        .filter(key => (/^balance_([/+a-zA-Z0-9]{27}=|\d{18})$/).test(key))
-        .map(key => ({
-          uid: key.match(/^balance_(?<uid>[/+a-zA-Z0-9]{27}=|\d{18})$/).groups.uid,
-          balance: this.store.getInstance(key)
-        }))
-        .sort((a, b) => {
-          if (a.balance < b.balance) return -1
-          if (a.balance > b.balance) return 1
-          return 0
-        })
-        .reverse()
-        .slice(offset, limit))
+      const regex = new RegExp(`^${this._prefixBalance}(?<uid>[/+a-zA-Z0-9]{27}=|\\d{18})$`)
+      return Promise.resolve(
+        this.store.getKeysInstance()
+          .filter(key => regex.test(key))
+          .map(key => ({
+            uid: key.match(regex).groups.uid,
+            balance: this.store.getInstance(key)
+          }))
+          .sort((a, b) => {
+            if (a.balance < b.balance) return -1
+            if (a.balance > b.balance) return 1
+            return 0
+          })
+          .reverse()
+          .slice(offset, limit)
+      )
     }
 
   }
@@ -210,7 +294,7 @@ registerPlugin({
           return num
         case "number":
           if (!Number.isSafeInteger(num)) {
-            engine.log(`WARNING a unsafe integer is being converted! (${num})`)
+            engine.log(`WARNING an unsafe integer is being converted! (${num})`)
             engine.log(`See https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER for details`)
           }
           return BigInt(num)
@@ -492,6 +576,83 @@ registerPlugin({
       if (ev.fromChannel !== null) return
       pushNickQueue(ev.client)
     })
+
+    //Database dump actions
+    if (parseInt(config.dump, 10) > 0) {
+      const type = parseInt(config.dump, 10)
+      config.dump = "0"
+      // eslint-disable-next-line camelcase
+      config.confirm_wipe = ""
+      // eslint-disable-next-line camelcase
+      config.confirm_restore = ""
+      engine.saveConfig(config)
+      const start = Date.now()
+      //CREATE DUMP
+      if (type === 1) {
+        engine.log("Running Backup actions! This may take a while...")
+        const [balances, history, nicknames] = await Promise.all([
+          store.getAllBalances(),
+          store.getAllHistory(),
+          store.getAllNicknames()
+        ])
+        require("store").setInstance("__ecodump__", {
+          date: Date.now(), balances, history, nicknames
+        })
+        engine.log(`Backup done in ${Date.now()-start}ms`)
+      //LOG DUMP STATUS
+      } else if (type === 2) {
+        const dump = require("store").getInstance("__ecodump__")
+        if (!dump) return engine.log("no saved dump found!")
+        engine.log(`dump created on ${new Date(dump.date)}`)
+      //LOG BASE64 DUMP
+      } else if (type === 3) {
+        const dump = require("store").getInstance("__ecodump__")
+        if (!dump) return engine.log("no saved dump found!")
+        engine.log("Creating base64 encoded dump...")
+        const marker = Array(60).fill("=").join("")
+        const base64 = require("helpers").base64Encode(JSON.stringify(dump))
+        engine.log(`\r\nCOPY BELOW ${marker}\r\n${base64}\r\nCOPY ABOVE ${marker}`)
+      //IMPORT BASE64 DUMP
+      } else if (type === 4) {
+        engine.log("Importing BASE64 String...")
+        const base64 = require("helpers").base64Decode(config.importb64)
+        if (typeof base64 !== "string") return engine.log("Corrupt base64 detected! Aborting")
+        require("store").setInstance("__ecodump__", JSON.parse(base64))
+        engine.log("Done")
+      //WRITE DUMP TO STORE
+      } else if (type === 5) {
+        engine.log("Restoring last backup!")
+        if (config.confirm_restore !== "CONFIRM RESTORE")
+          return engine.log("REFUSING TO RESTORE, INVALID CONFIRMATION GIVEN!")
+        const dump = require("store").getInstance("__ecodump__")
+        if (!dump) return engine.log("no saved dump found!")
+        const { date, balances, history, nicknames } = dump
+        engine.log(`Restoring dump from ${new Date(date)}! This may take a while...`)
+        engine.log("(1/4): Wiping Store...")
+        await store.reset()
+        engine.log("(2/4): Adding Balances...")
+        await store.setBalance(Object.keys(balances).map(uid => ({
+          uid, balance: dump.balances[uid]
+        })))
+        engine.log("(3/4): Adding History...")
+        const add = []
+        Object.keys(history).forEach(uid => {
+          add.push(...history[uid].map(data => ({ uid, ...data })))
+        })
+        await store.addHistory(add)
+        engine.log(`(4/4): Adding Nicknames...`)
+        await store.updateNicks(nicknames)
+        engine.log(`Restore done in ${Date.now()-start}ms!`)
+      //WIPE EVERYTHING
+      } else if (type === 6) {
+        engine.log("Restoring last backup!")
+        if (config.confirm_wipe !== "CONFIRM WIPE")
+          return engine.log("REFUSING TO WIPE, INVALID CONFIRMATION GIVEN!")
+        engine.log("Wiping Store...")
+        await store.reset()
+        engine.log(`Wipe done in ${Date.now()-start}ms!`)
+      }
+    }
   })
 
   event.on("unload", () => {
