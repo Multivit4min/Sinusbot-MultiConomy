@@ -2,7 +2,7 @@
 registerPlugin({
   name: "MultiConomy",
   engine: ">= 1.0.0",
-  version: "0.2.0",
+  version: "0.3.0",
   description: "Advanced Economy System",
   author: "Multivitamin <david.kartnaller@gmail.com",
   vars: [{
