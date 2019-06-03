@@ -1,7 +1,7 @@
 /* eslint-disable no-shadow */
 registerPlugin({
   name: "MultiConomy Commmands",
-  engine: ">= 0.13.37",
+  engine: ">= 1.0.0",
   version: "0.1.0",
   description: "Commands for Multiconomy",
   author: "Multivitamin <david.kartnaller@gmail.com",
