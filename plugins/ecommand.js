@@ -117,14 +117,10 @@ registerPlugin({
       .help("view your transaction history")
       .manual(`displays details about your 50 last transactions`)
       .exec(async (client, _, reply) => {
-        try {
-          const wallet = await eco.getWallet(client)
-          const history = await wallet.getHistory(50)
-          if (history.length === 0) return reply("No transactions found!")
-          history.forEach(({ change, reason }) => reply(`${format.bold(change < 0 ? `[color=red]${change}[/color]` : `[color=green]${change}[/color]`)} - ${reason}`))
-        } catch (e) {
-          engine.log(e.stack)
-        }
+        const wallet = await eco.getWallet(client)
+        const history = await wallet.getHistory(50)
+        if (history.length === 0) return reply("No transactions found!")
+        history.forEach(({ change, reason }) => reply(`${format.bold(change < 0 ? `[color=red]${change}[/color]` : `[color=green]${change}[/color]`)} - ${reason}`))
       })
 
     //wallet pay <client> <amount> - sends the amount of money to another client
@@ -136,18 +132,14 @@ registerPlugin({
       .addArgument(createArgument("client").setName("receiver"))
       .addArgument(createArgument("number").setName("amount").positive().integer())
       .exec(async (client, { receiver, amount }, reply) => {
-        try {
-          const [receiverWallet, senderWallet] = await Promise.all([eco.getWallet(receiver), eco.getWallet(client)])
-          if (!senderWallet.hasFunds(amount)) return reply("You do not have enough funds to do this transaction!")
-          receiverWallet.addBalance(amount, `Received from ${senderWallet.getOwner()}`)
-          senderWallet.removeBalance(amount, `Sent to ${receiverWallet.getOwner()}`)
-          reply(`You have sent ${amount}${eco.getCurrencySign()} to ${getNameFromUid(receiver)}!`)
-          const receiverClient = backend.getClientByUID(receiver)
-          if (!receiverClient) return
-          receiverClient.chat(`You have received ${amount}${eco.getCurrencySign()} from ${getNameFromUid(client.nick())}!`)
-        } catch (e) {
-          engine.log(e.stack)
-        }
+        const [receiverWallet, senderWallet] = await Promise.all([eco.getWallet(receiver), eco.getWallet(client)])
+        if (!senderWallet.hasFunds(amount)) return reply("You do not have enough funds to do this transaction!")
+        receiverWallet.addBalance(amount, `Received from ${senderWallet.getOwner()}`)
+        senderWallet.removeBalance(amount, `Sent to ${receiverWallet.getOwner()}`)
+        reply(`You have sent ${amount}${eco.getCurrencySign()} to ${getNameFromUid(receiver)}!`)
+        const receiverClient = backend.getClientByUID(receiver)
+        if (!receiverClient) return
+        receiverClient.chat(`You have received ${amount}${eco.getCurrencySign()} from ${getNameFromUid(client.nick())}!`)
       })
 
 

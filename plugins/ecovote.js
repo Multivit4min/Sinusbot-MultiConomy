@@ -1,10 +1,9 @@
 registerPlugin({
   name: "MultiConomy Vote",
-  engine: ">= 0.13.37",
+  engine: ">= 1.0.0",
   version: "0.1.0",
   description: "Commands for Multiconomy",
   author: "Multivitamin <david.kartnaller@gmail.com",
-  backends: ["ts3"],
   requiredModules: ["http"],
   vars: [{
     name: "KEY",
@@ -51,12 +50,11 @@ registerPlugin({
   }
 
 
-
   event.on("load", () => {
     const eco = require("MultiConomy")
     if (!eco) return engine.log("MultiConomy.js not found! Please be sure to install and enable MultiConomy.js")
     const Command = require("command")
-    if (!Command) return engine.log("command.js not found! Please be sure to install and enable Command.js")
+    if (!Command) return engine.log("command.js not found! Please be sure to install and enable command.js")
     const { createCommand } = Command
 
     async function addReward(client) {

@@ -2,7 +2,7 @@
 registerPlugin({
   name: "MultiConomy",
   engine: ">= 1.0.0",
-  version: "0.3.0",
+  version: "0.3.1",
   description: "Advanced Economy System",
   author: "Multivitamin <david.kartnaller@gmail.com",
   vars: [{
@@ -579,7 +579,8 @@ registerPlugin({
 
     //Database dump actions
     if (parseInt(config.dump, 10) > 0) {
-      const type = parseInt(config.dump, 10)
+      const conf = { ...config }
+      conf.dump = parseInt(conf.dump, 10)
       config.dump = "0"
       // eslint-disable-next-line camelcase
       config.confirm_wipe = ""
@@ -588,7 +589,7 @@ registerPlugin({
       engine.saveConfig(config)
       const start = Date.now()
       //CREATE DUMP
-      if (type === 1) {
+      if (conf.dump === 1) {
         engine.log("Running Backup actions! This may take a while...")
         const [balances, history, nicknames] = await Promise.all([
           store.getAllBalances(),
@@ -600,12 +601,12 @@ registerPlugin({
         })
         engine.log(`Backup done in ${Date.now()-start}ms`)
       //LOG DUMP STATUS
-      } else if (type === 2) {
+      } else if (conf.dump === 2) {
         const dump = require("store").getInstance("__ecodump__")
         if (!dump) return engine.log("no saved dump found!")
         engine.log(`dump created on ${new Date(dump.date)}`)
       //LOG BASE64 DUMP
-      } else if (type === 3) {
+      } else if (conf.dump === 3) {
         const dump = require("store").getInstance("__ecodump__")
         if (!dump) return engine.log("no saved dump found!")
         engine.log("Creating base64 encoded dump...")
@@ -613,17 +614,17 @@ registerPlugin({
         const base64 = require("helpers").base64Encode(JSON.stringify(dump))
         engine.log(`\r\nCOPY BELOW ${marker}\r\n${base64}\r\nCOPY ABOVE ${marker}`)
       //IMPORT BASE64 DUMP
-      } else if (type === 4) {
+      } else if (conf.dump === 4) {
         engine.log("Importing BASE64 String...")
-        const base64 = require("helpers").base64Decode(config.importb64)
+        const base64 = require("helpers").base64Decode(conf.importb64)
         if (typeof base64 !== "string") return engine.log("Corrupt base64 detected! Aborting")
         require("store").setInstance("__ecodump__", JSON.parse(base64))
         engine.log("Done")
       //WRITE DUMP TO STORE
-      } else if (type === 5) {
+      } else if (conf.dump === 5) {
         engine.log("Restoring last backup!")
-        if (config.confirm_restore !== "CONFIRM RESTORE")
-          return engine.log("REFUSING TO RESTORE, INVALID CONFIRMATION GIVEN!")
+        if (conf.confirm_restore !== "CONFIRM RESTORE")
+          return engine.log(`REFUSING TO RESTORE, INVALID CONFIRMATION GIVEN! GOT "${conf.confirm_restore}"`)
         const dump = require("store").getInstance("__ecodump__")
         if (!dump) return engine.log("no saved dump found!")
         const { date, balances, history, nicknames } = dump
@@ -644,10 +645,10 @@ registerPlugin({
         await store.updateNicks(nicknames)
         engine.log(`Restore done in ${Date.now()-start}ms!`)
       //WIPE EVERYTHING
-      } else if (type === 6) {
+      } else if (conf.dump === 6) {
         engine.log("Restoring last backup!")
-        if (config.confirm_wipe !== "CONFIRM WIPE")
-          return engine.log("REFUSING TO WIPE, INVALID CONFIRMATION GIVEN!")
+        if (conf.confirm_wipe !== "CONFIRM ERASE")
+          return engine.log(`REFUSING TO WIPE, INVALID CONFIRMATION GIVEN! GOT "${conf.confirm_wipe}"`)
         engine.log("Wiping Store...")
         await store.reset()
         engine.log(`Wipe done in ${Date.now()-start}ms!`)
